@@ -1,0 +1,90 @@
+version: "3.9"
+
+services:
+  # ─── Auth ───────────────────────────────────────────────
+  auth-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: authuser
+      POSTGRES_PASSWORD: authpass
+      POSTGRES_DB: authdb
+    networks: [microservice-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authuser -d authdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  auth-service:
+    build: ./auth-service
+    ports: ["8001:8001"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://authuser:authpass@auth-db:5432/authdb
+      JWT_SECRET: supersecretkey_changeme_in_prod
+      JWT_ALGORITHM: HS256
+      ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    networks: [microservice-net]
+
+  # ─── Product ────────────────────────────────────────────
+  product-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: productuser
+      POSTGRES_PASSWORD: productpass
+      POSTGRES_DB: productdb
+    networks: [microservice-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U productuser -d productdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  product-service:
+    build: ./product-service
+    ports: ["8002:8002"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://productuser:productpass@product-db:5432/productdb
+      AUTH_SERVICE_URL: http://auth-service:8001
+    depends_on:
+      product-db:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    networks: [microservice-net]
+
+  # ─── Order ──────────────────────────────────────────────
+  order-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: orderuser
+      POSTGRES_PASSWORD: orderpass
+      POSTGRES_DB: orderdb
+    networks: [microservice-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderuser -d orderdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  order-service:
+    build: ./order-service
+    ports: ["8003:8003"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://orderuser:orderpass@order-db:5432/orderdb
+      AUTH_SERVICE_URL: http://auth-service:8001
+      PRODUCT_SERVICE_URL: http://product-service:8002
+    depends_on:
+      order-db:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      product-service:
+        condition: service_started
+    networks: [microservice-net]
+
+networks:
+  microservice-net:
+    driver: bridge
