@@ -1,0 +1,87 @@
+# REFERENCE ONLY — do NOT mount this file into the container.
+# WSO2 APIM requires a complete deployment.toml; partial overrides break the config parser.
+# Configure IS Key Manager and API definitions through the APIM admin/publisher portal instead.
+# See the setup steps below for the full manual configuration guide.
+
+[server]
+hostname = "wso2-apim"
+base_path = "${carbon.protocol}://${carbon.host}:${carbon.management.port}"
+
+[super_admin]
+username = "admin"
+password = "admin"
+create_admin_account = true
+
+[database.apim_db]
+type = "h2"
+# For production, use a dedicated PostgreSQL instance.
+
+# ── WSO2 IS as Key Manager ─────────────────────────────
+# Register IS as the external Key Manager through the APIM admin portal
+# after startup, OR configure it here:
+#
+# APIM Publisher/Admin portal (https://localhost:9444/admin):
+#   Key Managers → Add Key Manager
+#   - Name:          WSO2-IS
+#   - Type:          WSO2 Identity Server
+#   - Well-known URL: https://wso2-is:9443/oauth2/oidcdiscovery/.well-known/openid-configuration
+#   APIM will auto-populate token endpoint, JWKS URI, etc. from the well-known endpoint.
+#   Provide the service provider client_id and client_secret from IS.
+
+# ── Backend JWT (X-JWT-Assertion) injection ────────────
+[apim.jwt]
+enable = true
+encoding = "base64"
+header = "X-JWT-Assertion"
+signing_algorithm = "SHA256withRSA"
+# APIM re-signs the assertion with its own keypair — backends validate against APIM JWKS:
+# https://wso2-apim:8243/oauth2/jwks
+
+# Claims to include in the backend JWT assertion
+[[apim.jwt.claim_mapping]]
+remote_claim = "sub"
+local_claim = "sub"
+
+[[apim.jwt.claim_mapping]]
+remote_claim = "email"
+local_claim = "http://wso2.org/claims/emailaddress"
+
+[[apim.jwt.claim_mapping]]
+remote_claim = "preferred_username"
+local_claim = "http://wso2.org/claims/username"
+
+# ── API Definitions ────────────────────────────────────
+# Create the following APIs in APIM Publisher (https://localhost:9444/publisher)
+# pointing to the internal Docker service hostnames:
+#
+# Auth API:
+#   Context:  /auth
+#   Backend:  http://auth-service:8001
+#   Routes:
+#     GET  /me              → OAuth2 secured (scope: openid)
+#     POST /users/provision → Internal (add IP restriction or use a subscription tier with no OAuth)
+#
+# Products API:
+#   Context:  /products
+#   Backend:  http://product-service:8002
+#   Routes:
+#     GET  /           → None (public)
+#     GET  /{id}       → None (public)
+#     POST /           → OAuth2 (scope: products:write)
+#     PUT  /{id}       → OAuth2 (scope: products:write)
+#     DELETE /{id}     → OAuth2 (scope: products:write)
+#
+# Orders API:
+#   Context:  /orders
+#   Backend:  http://order-service:8003
+#   Routes:
+#     GET    /           → OAuth2 (scope: orders:read)
+#     GET    /{id}       → OAuth2 (scope: orders:read)
+#     POST   /           → OAuth2 (scope: orders:write)
+#     PATCH  /{id}/cancel → OAuth2 (scope: orders:write)
+
+[apim.analytics]
+enable = false  # enable in production with Choreo Analytics or ELK
+
+[log4j2]
+appenders = "CARBON_CONSOLE, CARBON_LOGFILE"

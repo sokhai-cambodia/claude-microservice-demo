@@ -1,0 +1,86 @@
+# REFERENCE ONLY — do NOT mount this file into the container.
+# WSO2 IS requires a complete deployment.toml; partial overrides break the config parser.
+# Configure GitHub IdP and OAuth settings through the IS admin console instead.
+# See the setup steps below for the full manual configuration guide.
+
+[server]
+hostname = "wso2-is"
+base_path = "${carbon.protocol}://${carbon.host}:${carbon.management.port}"
+
+[super_admin]
+username = "admin"
+password = "admin"
+create_admin_account = true
+
+[user_store]
+type = "database_unique_id"
+
+[database.identity_db]
+type = "h2"
+# For production, replace with a dedicated PostgreSQL instance:
+# type = "postgre"
+# url = "jdbc:postgresql://wso2-is-db:5432/identitydb"
+# username = "isuser"
+# password = "ispass"
+
+# ── OAuth2 / OIDC ──────────────────────────────────────
+[oauth]
+# Issue signed JWT access tokens (not opaque) so APIM can validate locally
+token_type = "JWT"
+
+[oauth.token.jwt]
+signature_algorithm = "RS256"
+# Claims to embed in the JWT access token
+enable_user_claims = true
+
+# Standard OIDC claim mappings
+[[oauth.oidc.claims]]
+claim_uri = "sub"
+
+[[oauth.oidc.claims]]
+claim_uri = "email"
+
+[[oauth.oidc.claims]]
+claim_uri = "preferred_username"
+
+[[oauth.oidc.claims]]
+claim_uri = "given_name"
+
+[[oauth.oidc.claims]]
+claim_uri = "family_name"
+
+[oauth.token_validation]
+include_validation_context_info_in_error_response = true
+
+# ── GitHub Identity Provider ────────────────────────────
+# Configure GitHub IdP through the IS admin console after startup:
+#
+# 1. Register your OAuth App on GitHub:
+#    https://github.com/settings/developers → OAuth Apps → New OAuth App
+#    Homepage URL:            https://wso2-is:9443
+#    Authorization callback: https://wso2-is:9443/commonauth
+#    Note the Client ID and Client Secret.
+#
+# 2. In IS admin console (https://localhost:9443/console):
+#    Connections → New Connection → GitHub
+#    - Name:          GitHub
+#    - Client ID:     <from GitHub OAuth App>
+#    - Client Secret: <from GitHub OAuth App>
+#    - Scopes:        user:email read:user
+#
+# 3. Under the GitHub IdP → Just-in-Time Provisioning:
+#    - Enable:                 Yes
+#    - Provisioning User Store: PRIMARY
+#    - Provision silently:     Yes
+#
+# 4. Create a Service Provider for APIM:
+#    Applications → New Application → Standard-Based Application
+#    - Name:         microservice-demo-sp
+#    - Grant types:  authorization_code, client_credentials, refresh_token
+#    - Callback URL: https://wso2-apim:8243/commonauth
+#    - Token type:   JWT
+#    Note the client_id and client_secret — needed when registering APIM.
+
+# ── Logging (optional tuning for dev) ──────────────────
+[log4j2]
+appenders = "CARBON_CONSOLE, CARBON_LOGFILE"

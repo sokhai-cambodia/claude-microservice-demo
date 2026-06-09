@@ -1,30 +1,16 @@
-import os
-import httpx
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Header, HTTPException, status
 
-AUTH_SERVICE_URL = os.environ["AUTH_SERVICE_URL"]
-bearer_scheme = HTTPBearer()
+from .jwks import get_claims_from_assertion
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    x_jwt_assertion: str = Header(..., alias="X-JWT-Assertion"),
 ) -> dict:
-    token = credentials.credentials
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{AUTH_SERVICE_URL}/auth/verify",
-                params={"token": token},
-                timeout=5.0,
-            )
-    except httpx.RequestError:
-        raise HTTPException(status_code=503, detail="Auth service unavailable")
-
-    if resp.status_code != 200:
+        return await get_claims_from_assertion(x_jwt_assertion)
+    except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail=str(e),
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return resp.json()

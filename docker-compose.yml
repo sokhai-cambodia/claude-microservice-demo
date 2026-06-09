@@ -1,7 +1,52 @@
-version: "3.9"
+networks:
+  microservice-net:
+    driver: bridge
+
+volumes:
+  wso2-is-data:
+  wso2-apim-data:
 
 services:
-  # ─── Auth ───────────────────────────────────────────────
+  # ─── WSO2 Identity Server ───────────────────────────────
+  wso2-is:
+    image: wso2/wso2is:7.0.0
+    ports:
+      - "9443:9443"   # HTTPS admin console — remove in production
+    environment:
+      JAVA_OPTS: "-Xms512m -Xmx1024m"
+    volumes:
+      - wso2-is-data:/home/wso2carbon/wso2is-7.0.0/repository/data
+    networks: [microservice-net]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -k -sf https://localhost:9443/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 12
+      start_period: 120s
+
+  # ─── WSO2 API Manager ──────────────────────────────────
+  wso2-apim:
+    image: wso2/wso2am:4.3.0
+    ports:
+      - "8280:8280"   # HTTP gateway
+      - "8243:8243"   # HTTPS gateway
+      - "9444:9444"   # Publisher / Developer portal (dev only)
+    environment:
+      JAVA_OPTS: "-Xms512m -Xmx2048m"
+    volumes:
+      - wso2-apim-data:/home/wso2carbon/wso2am-4.3.0/repository/data
+    networks: [microservice-net]
+    depends_on:
+      wso2-is:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -k -sf https://localhost:9444/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 12
+      start_period: 180s
+
+  # ─── Auth ──────────────────────────────────────────────
   auth-db:
     image: postgres:16-alpine
     environment:
@@ -17,18 +62,20 @@ services:
 
   auth-service:
     build: ./auth-service
-    ports: ["8001:8001"]
+    # No public ports — all traffic enters through WSO2 APIM
     environment:
       DATABASE_URL: postgresql+asyncpg://authuser:authpass@auth-db:5432/authdb
-      JWT_SECRET: supersecretkey_changeme_in_prod
-      JWT_ALGORITHM: HS256
-      ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+      JWKS_URI: https://wso2-apim:8243/oauth2/jwks
+      IS_SSL_VERIFY: "false"
+      INTERNAL_PROVISION_SECRET: changeme_provision_secret_in_prod
     depends_on:
       auth-db:
         condition: service_healthy
+      wso2-apim:
+        condition: service_healthy
     networks: [microservice-net]
 
-  # ─── Product ────────────────────────────────────────────
+  # ─── Product ───────────────────────────────────────────
   product-db:
     image: postgres:16-alpine
     environment:
@@ -44,18 +91,19 @@ services:
 
   product-service:
     build: ./product-service
-    ports: ["8002:8002"]
+    # No public ports
     environment:
       DATABASE_URL: postgresql+asyncpg://productuser:productpass@product-db:5432/productdb
-      AUTH_SERVICE_URL: http://auth-service:8001
+      JWKS_URI: https://wso2-apim:8243/oauth2/jwks
+      IS_SSL_VERIFY: "false"
     depends_on:
       product-db:
         condition: service_healthy
-      auth-service:
-        condition: service_started
+      wso2-apim:
+        condition: service_healthy
     networks: [microservice-net]
 
-  # ─── Order ──────────────────────────────────────────────
+  # ─── Order ─────────────────────────────────────────────
   order-db:
     image: postgres:16-alpine
     environment:
@@ -71,20 +119,17 @@ services:
 
   order-service:
     build: ./order-service
-    ports: ["8003:8003"]
+    # No public ports
     environment:
       DATABASE_URL: postgresql+asyncpg://orderuser:orderpass@order-db:5432/orderdb
-      AUTH_SERVICE_URL: http://auth-service:8001
+      JWKS_URI: https://wso2-apim:8243/oauth2/jwks
+      IS_SSL_VERIFY: "false"
       PRODUCT_SERVICE_URL: http://product-service:8002
     depends_on:
       order-db:
         condition: service_healthy
-      auth-service:
-        condition: service_started
+      wso2-apim:
+        condition: service_healthy
       product-service:
         condition: service_started
     networks: [microservice-net]
-
-networks:
-  microservice-net:
-    driver: bridge

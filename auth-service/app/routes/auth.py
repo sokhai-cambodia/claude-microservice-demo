@@ -1,85 +1,69 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import JWTError
-from passlib.context import CryptContext
+import os
+
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
-from ..jwt import create_access_token, decode_token
+from ..jwks import get_claims_from_assertion
 from ..models import User
-from ..schemas import LoginRequest, TokenResponse, UserCreate, UserResponse
+from ..schemas import UserProvisionRequest, UserResponse
+
+_PROVISION_SECRET = os.environ.get("INTERNAL_PROVISION_SECRET", "")
 
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-bearer_scheme = HTTPBearer()
-
-
-@router.post("/register", response_model=UserResponse, status_code=201)
-async def register(payload: UserCreate, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.username == payload.username))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Username already taken")
-
-    result = await db.execute(select(User).where(User.email == payload.email))
-    if result.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    user = User(
-        username=payload.username,
-        email=payload.email,
-        hashed_password=pwd_context.hash(payload.password),
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
-
-
-@router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.username == payload.username))
-    user = result.scalar_one_or_none()
-
-    if not user or not pwd_context.verify(payload.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
-    if not user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
-
-    token = create_access_token(
-        {"sub": str(user.id), "username": user.username, "email": user.email}
-    )
-    return {"access_token": token}
 
 
 @router.get("/me", response_model=UserResponse)
 async def me(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    x_jwt_assertion: str = Header(..., alias="X-JWT-Assertion"),
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        payload = decode_token(credentials.credentials)
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        claims = await get_claims_from_assertion(x_jwt_assertion)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
 
-    result = await db.execute(select(User).where(User.id == int(payload["sub"])))
+    result = await db.execute(
+        select(User).where(User.external_sub == claims.get("sub"))
+    )
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(status_code=404, detail="User profile not found")
     return user
 
 
-@router.get("/verify")
-async def verify(token: str = Query(...)):
-    try:
-        payload = decode_token(token)
-        return {
-            "sub": payload["sub"],
-            "username": payload["username"],
-            "email": payload["email"],
-        }
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+@router.post("/users/provision", response_model=UserResponse, status_code=201)
+async def provision_user(
+    payload: UserProvisionRequest,
+    x_internal_secret: str = Header(..., alias="X-Internal-Secret"),
+    db: AsyncSession = Depends(get_db),
+):
+    if not _PROVISION_SECRET or x_internal_secret != _PROVISION_SECRET:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    # Idempotent — return existing record if already provisioned
+    result = await db.execute(
+        select(User).where(User.external_sub == payload.external_sub)
+    )
+    existing = result.scalar_one_or_none()
+    if existing:
+        return existing
+
+    # Link to an existing local account by email if one exists
+    result = await db.execute(select(User).where(User.email == payload.email))
+    user = result.scalar_one_or_none()
+    if user:
+        user.external_sub = payload.external_sub
+    else:
+        user = User(
+            username=payload.username,
+            email=payload.email,
+            hashed_password=None,
+            external_sub=payload.external_sub,
+        )
+        db.add(user)
+
+    await db.commit()
+    await db.refresh(user)
+    return user

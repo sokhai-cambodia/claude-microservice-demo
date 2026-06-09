@@ -18,7 +18,7 @@ async def list_orders(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    user_id = int(current_user["sub"])
+    user_id = current_user["sub"]
     result = await db.execute(select(Order).where(Order.user_id == user_id))
     return result.scalars().all()
 
@@ -29,7 +29,7 @@ async def get_order(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    user_id = int(current_user["sub"])
+    user_id = current_user["sub"]
     result = await db.execute(
         select(Order).where(Order.id == order_id, Order.user_id == user_id)
     )
@@ -45,7 +45,7 @@ async def create_order(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    user_id = int(current_user["sub"])
+    user_id = current_user["sub"]
 
     resolved = []
     total = Decimal("0")
@@ -79,7 +79,7 @@ async def cancel_order(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    user_id = int(current_user["sub"])
+    user_id = current_user["sub"]
     result = await db.execute(
         select(Order).where(Order.id == order_id, Order.user_id == user_id)
     )
