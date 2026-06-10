@@ -4,7 +4,11 @@ networks:
 
 volumes:
   wso2-is-data:
+  wso2-is-db:
+  wso2-is-prefs:
   wso2-apim-data:
+  wso2-apim-db:
+  wso2-apim-prefs:
 
 services:
   # ─── WSO2 Identity Server ───────────────────────────────
@@ -13,12 +17,17 @@ services:
     ports:
       - "9443:9443"   # HTTPS admin console — remove in production
     environment:
-      JAVA_OPTS: "-Xms512m -Xmx1024m"
+      JAVA_OPTS: "-Xms512m -Xmx1024m -Djava.util.prefs.systemRoot=/home/wso2carbon/.javaprefs -Djava.util.prefs.userRoot=/home/wso2carbon/.javaprefs"
     volumes:
       - wso2-is-data:/home/wso2carbon/wso2is-7.0.0/repository/data
+      - wso2-is-db:/home/wso2carbon/wso2is-7.0.0/repository/database
+      - wso2-is-prefs:/home/wso2carbon/.javaprefs
+      - ./wso2-is-conf/deployment.toml:/home/wso2carbon/wso2is-7.0.0/repository/conf/deployment.toml:ro
+      - ./wso2-is-conf/security/wso2carbon.jks:/home/wso2carbon/wso2is-7.0.0/repository/resources/security/wso2carbon.jks:ro
+      - ./wso2-is-conf/security/client-truststore.jks:/home/wso2carbon/wso2is-7.0.0/repository/resources/security/client-truststore.jks:ro
     networks: [microservice-net]
     healthcheck:
-      test: ["CMD-SHELL", "curl -k -sf https://localhost:9443/healthz || exit 1"]
+      test: ["CMD", "bash", "-c", "exec 6<>/dev/tcp/localhost/9443"]
       interval: 30s
       timeout: 10s
       retries: 12
@@ -28,19 +37,23 @@ services:
   wso2-apim:
     image: wso2/wso2am:4.3.0
     ports:
-      - "8280:8280"   # HTTP gateway
-      - "8243:8243"   # HTTPS gateway
-      - "9444:9444"   # Publisher / Developer portal (dev only)
+      - "8281:8281"   # HTTP gateway  (8280 + offset 1)
+      - "8244:8244"   # HTTPS gateway (8243 + offset 1)
+      - "9444:9444"   # Publisher / Developer portal (9443 + offset 1)
     environment:
-      JAVA_OPTS: "-Xms512m -Xmx2048m"
+      JAVA_OPTS: "-Xms512m -Xmx2048m -Djava.util.prefs.systemRoot=/home/wso2carbon/.javaprefs -Djava.util.prefs.userRoot=/home/wso2carbon/.javaprefs"
     volumes:
       - wso2-apim-data:/home/wso2carbon/wso2am-4.3.0/repository/data
+      - wso2-apim-db:/home/wso2carbon/wso2am-4.3.0/repository/database
+      - wso2-apim-prefs:/home/wso2carbon/.javaprefs
+      - ./wso2-apim-conf/deployment.toml:/home/wso2carbon/wso2am-4.3.0/repository/conf/deployment.toml:ro
+      - ./wso2-apim-conf/client-truststore.jks:/home/wso2carbon/wso2am-4.3.0/repository/resources/security/client-truststore.jks:ro
     networks: [microservice-net]
     depends_on:
       wso2-is:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -k -sf https://localhost:9444/healthz || exit 1"]
+      test: ["CMD", "bash", "-c", "exec 6<>/dev/tcp/localhost/9444"]
       interval: 30s
       timeout: 10s
       retries: 12
@@ -65,7 +78,7 @@ services:
     # No public ports — all traffic enters through WSO2 APIM
     environment:
       DATABASE_URL: postgresql+asyncpg://authuser:authpass@auth-db:5432/authdb
-      JWKS_URI: https://wso2-apim:8243/oauth2/jwks
+      JWKS_URI: https://wso2-apim:8244/oauth2/jwks
       IS_SSL_VERIFY: "false"
       INTERNAL_PROVISION_SECRET: changeme_provision_secret_in_prod
     depends_on:
@@ -94,7 +107,7 @@ services:
     # No public ports
     environment:
       DATABASE_URL: postgresql+asyncpg://productuser:productpass@product-db:5432/productdb
-      JWKS_URI: https://wso2-apim:8243/oauth2/jwks
+      JWKS_URI: https://wso2-apim:8244/oauth2/jwks
       IS_SSL_VERIFY: "false"
     depends_on:
       product-db:
@@ -122,7 +135,7 @@ services:
     # No public ports
     environment:
       DATABASE_URL: postgresql+asyncpg://orderuser:orderpass@order-db:5432/orderdb
-      JWKS_URI: https://wso2-apim:8243/oauth2/jwks
+      JWKS_URI: https://wso2-apim:8244/oauth2/jwks
       IS_SSL_VERIFY: "false"
       PRODUCT_SERVICE_URL: http://product-service:8002
     depends_on:
